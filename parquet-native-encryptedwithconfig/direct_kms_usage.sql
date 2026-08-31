@@ -5,7 +5,7 @@
 
 LOAD encrypted_parquet;
 
-PRAGMA clear_encrypted_parquet_config();
+PRAGMA clear_encrypted_parquet_config;
 
 -- Example only. Replace with the actual 16/24/32-byte AES key used by your
 -- application. The first argument is only DuckDB's local key-registry name.
@@ -41,7 +41,7 @@ COPY (
   }
 );
 
-PRAGMA clear_encrypted_parquet_config();
+PRAGMA clear_encrypted_parquet_config;
 
 -- FileCryptoMetaData.key_metadata is a PKMT1 JSON payload containing at least:
 --   masterKeyID / parquet.encryption.footer.key = kms-master-key-123
