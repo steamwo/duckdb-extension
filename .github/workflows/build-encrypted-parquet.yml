@@ -45,7 +45,7 @@ jobs:
           test -s parquet-native-encryptedwithconfig/dist/linux_amd64/encrypted_parquet.duckdb_extension
           file parquet-native-encryptedwithconfig/dist/linux_amd64/encrypted_parquet.duckdb_extension
 
-      - name: Runtime smoke test
+      - name: Runtime and COPY-config isolation smoke test
         run: |
           cd parquet-native-encryptedwithconfig/dist/linux_amd64
           cat > smoke.sql <<'SQL'
@@ -61,14 +61,63 @@ jobs:
           ORDER BY function_name;
           SET force_mbedtls_unsafe=true;
           PRAGMA clear_encrypted_parquet_config;
-          PRAGMA set_encrypted_parquet_config('parquet.encryption.footer.key','smoke-master-key');
-          PRAGMA add_encrypted_parquet_key('smoke_local','0123456789abcdef');
-          COPY (SELECT 1 AS id) TO 'smoke.parquet'
-          (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {footer_key:'smoke_local'});
+          PRAGMA set_encrypted_parquet_config('parquet.encryption.footer.key','legacy-global-master');
+          PRAGMA set_encrypted_parquet_config('parquet.crypto.factory.class','legacy.GlobalFactory');
+          PRAGMA add_encrypted_parquet_key('smoke_local_a','0123456789abcdef');
+          PRAGMA add_encrypted_parquet_key('smoke_local_b','abcdef0123456789');
+
+          -- PR #1 legacy fallback remains functional.
+          COPY (SELECT 0 AS id) TO 'legacy.parquet'
+          (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {footer_key:'smoke_local_a'});
+
+          -- COPY-local Direct-KMS metadata must win over the conflicting shared
+          -- PRAGMA values and remain isolated between files.
+          COPY (SELECT 1 AS id) TO 'copy_a.parquet'
+          (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {
+            footer_key:'smoke_local_a',
+            master_key_id:'copy-master-A',
+            kms_instance_id:'kms-A',
+            kms_instance_url:'https://kms-a.invalid',
+            crypto_factory_class:'copy.FactoryA',
+            kms_client_class:'copy.ClientA'
+          });
+          COPY (SELECT 2 AS id) TO 'copy_b.parquet'
+          (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {
+            footer_key:'smoke_local_b',
+            master_key_id:'copy-master-B',
+            kms_instance_id:'kms-B',
+            kms_instance_url:'https://kms-b.invalid',
+            crypto_factory_class:'copy.FactoryB',
+            kms_client_class:'copy.ClientB'
+          });
           PRAGMA clear_encrypted_parquet_config;
           SQL
           ./duckdb -unsigned < smoke.sql
-          test -s smoke.parquet
+          test -s legacy.parquet
+          test -s copy_a.parquet
+          test -s copy_b.parquet
+          python - <<'PY'
+          from pathlib import Path
+
+          legacy = Path('legacy.parquet').read_bytes()
+          a = Path('copy_a.parquet').read_bytes()
+          b = Path('copy_b.parquet').read_bytes()
+
+          assert b'legacy-global-master' in legacy
+          assert b'copy-master-A' in a
+          assert b'kms-A' in a
+          assert b'copy.FactoryA' in a
+          assert b'copy.ClientA' in a
+          assert b'copy-master-B' not in a
+          assert b'legacy-global-master' not in a
+
+          assert b'copy-master-B' in b
+          assert b'kms-B' in b
+          assert b'copy.FactoryB' in b
+          assert b'copy.ClientB' in b
+          assert b'copy-master-A' not in b
+          assert b'legacy-global-master' not in b
+          PY
 
       - name: Upload Linux x86_64 extension
         uses: actions/upload-artifact@v4
@@ -107,7 +156,7 @@ jobs:
           if (!(Test-Path $p)) { throw "Missing extension: $p" }
           if ((Get-Item $p).Length -le 0) { throw "Empty extension: $p" }
 
-      - name: Runtime smoke test
+      - name: Runtime and COPY-config isolation smoke test
         shell: pwsh
         run: |
           $dist = (Resolve-Path 'parquet-native-encryptedwithconfig/dist/windows_amd64').Path
@@ -128,16 +177,61 @@ jobs:
           ORDER BY function_name;
           SET force_mbedtls_unsafe=true;
           PRAGMA clear_encrypted_parquet_config;
-          PRAGMA set_encrypted_parquet_config('parquet.encryption.footer.key','smoke-master-key');
-          PRAGMA add_encrypted_parquet_key('smoke_local','0123456789abcdef');
-          COPY (SELECT 1 AS id) TO 'smoke.parquet'
-          (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {footer_key:'smoke_local'});
+          PRAGMA set_encrypted_parquet_config('parquet.encryption.footer.key','legacy-global-master');
+          PRAGMA set_encrypted_parquet_config('parquet.crypto.factory.class','legacy.GlobalFactory');
+          PRAGMA add_encrypted_parquet_key('smoke_local_a','0123456789abcdef');
+          PRAGMA add_encrypted_parquet_key('smoke_local_b','abcdef0123456789');
+          COPY (SELECT 0 AS id) TO 'legacy.parquet'
+          (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {footer_key:'smoke_local_a'});
+          COPY (SELECT 1 AS id) TO 'copy_a.parquet'
+          (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {
+            footer_key:'smoke_local_a',
+            master_key_id:'copy-master-A',
+            kms_instance_id:'kms-A',
+            kms_instance_url:'https://kms-a.invalid',
+            crypto_factory_class:'copy.FactoryA',
+            kms_client_class:'copy.ClientA'
+          });
+          COPY (SELECT 2 AS id) TO 'copy_b.parquet'
+          (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {
+            footer_key:'smoke_local_b',
+            master_key_id:'copy-master-B',
+            kms_instance_id:'kms-B',
+            kms_instance_url:'https://kms-b.invalid',
+            crypto_factory_class:'copy.FactoryB',
+            kms_client_class:'copy.ClientB'
+          });
           PRAGMA clear_encrypted_parquet_config;
           "@
             $sql | & $duck -unsigned
             if ($LASTEXITCODE -ne 0) { throw "DuckDB runtime smoke test failed with exit code $LASTEXITCODE" }
-            if (!(Test-Path 'smoke.parquet')) { throw 'smoke.parquet was not produced' }
-            if ((Get-Item 'smoke.parquet').Length -le 0) { throw 'smoke.parquet is empty' }
+            foreach ($file in @('legacy.parquet', 'copy_a.parquet', 'copy_b.parquet')) {
+              if (!(Test-Path $file)) { throw "$file was not produced" }
+              if ((Get-Item $file).Length -le 0) { throw "$file is empty" }
+            }
+            @'
+          from pathlib import Path
+
+          legacy = Path('legacy.parquet').read_bytes()
+          a = Path('copy_a.parquet').read_bytes()
+          b = Path('copy_b.parquet').read_bytes()
+
+          assert b'legacy-global-master' in legacy
+          assert b'copy-master-A' in a
+          assert b'kms-A' in a
+          assert b'copy.FactoryA' in a
+          assert b'copy.ClientA' in a
+          assert b'copy-master-B' not in a
+          assert b'legacy-global-master' not in a
+
+          assert b'copy-master-B' in b
+          assert b'kms-B' in b
+          assert b'copy.FactoryB' in b
+          assert b'copy.ClientB' in b
+          assert b'copy-master-A' not in b
+          assert b'legacy-global-master' not in b
+          '@ | python -
+            if ($LASTEXITCODE -ne 0) { throw "COPY-config isolation check failed with exit code $LASTEXITCODE" }
           } finally {
             Pop-Location
           }
