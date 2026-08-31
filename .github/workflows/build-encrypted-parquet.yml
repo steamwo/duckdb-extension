@@ -73,7 +73,7 @@ jobs:
 
       - name: Build encrypted_parquet
         shell: pwsh
-        run: ./parquet-native-encryptedwithconfig/build-windows-native-final.ps1
+        run: ./parquet-native-encryptedwithconfig/build-windows-native-final.ps1 -Work "$env:RUNNER_TEMP\ep"
 
       - name: Verify extension artifact
         shell: pwsh
