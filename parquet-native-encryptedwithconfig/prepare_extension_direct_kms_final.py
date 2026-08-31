@@ -37,12 +37,42 @@ def rep(rel, old, new, count=1):
         raise RuntimeError(f'{rel}: expected {count} occurrence(s), found {actual}: {old[:160]!r}')
     p.write_text(s.replace(old, new), encoding='utf-8')
 
-# DuckDB does not accept an empty argument list for PRAGMA_CALL syntax.
-# Register the no-argument clear operation as a statement so callers can use:
-#   PRAGMA clear_encrypted_parquet_config;
+# DuckDB v1.5.5 does not provide a usable zero-argument PRAGMA_CALL syntax for
+# loadable extensions, and PRAGMA_STATEMENT registration is not resolving for
+# this loadable extension at runtime. Make clear/reset a real zero-argument
+# table function, which DuckDB explicitly supports through CALL.
+rep('include/parquet_crypto.hpp',
+'''\tstatic void ClearConfig(ClientContext &context, const FunctionParameters &parameters);\n\tstatic bool ValidKey(const std::string &key);''',
+'''\tstatic void ClearConfig(ClientContext &context, const FunctionParameters &parameters);\n\tstatic void ClearConfiguration(ClientContext &context);\n\tstatic bool ValidKey(const std::string &key);''')
+
+rep('parquet_crypto.cpp',
+'''void ParquetCrypto::ClearConfig(ClientContext &context, const FunctionParameters &parameters) {\n\tEncryptedParquetConfiguration::Get(context).Clear();\n}''',
+'''void ParquetCrypto::ClearConfiguration(ClientContext &context) {\n\tEncryptedParquetConfiguration::Get(context).Clear();\n}\n\nvoid ParquetCrypto::ClearConfig(ClientContext &context, const FunctionParameters &parameters) {\n\tClearConfiguration(context);\n}''')
+
+clear_helpers = r'''class ClearEncryptedParquetConfigBindData : public TableFunctionData {
+};
+
+static unique_ptr<FunctionData> ClearEncryptedParquetConfigBind(ClientContext &context, TableFunctionBindInput &input,
+                                                                vector<LogicalType> &return_types,
+                                                                vector<string> &names) {
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("Success");
+	return make_uniq<ClearEncryptedParquetConfigBindData>();
+}
+
+static void ClearEncryptedParquetConfigTable(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
+	ParquetCrypto::ClearConfiguration(context);
+	output.SetCardinality(0);
+}
+
+static void LoadInternal(ExtensionLoader &loader) {'''
 rep('parquet_extension.cpp',
-'''PragmaFunction::PragmaCall("clear_encrypted_parquet_config", ParquetCrypto::ClearConfig, {})''',
-'''PragmaFunction::PragmaStatement("clear_encrypted_parquet_config", ParquetCrypto::ClearConfig)''')
+'''static void LoadInternal(ExtensionLoader &loader) {''',
+clear_helpers)
+
+rep('parquet_extension.cpp',
+'''\tauto clear_config_fun =\n\t    PragmaFunction::PragmaCall("clear_encrypted_parquet_config", ParquetCrypto::ClearConfig, {});\n\tloader.RegisterFunction(clear_config_fun);''',
+'''\tauto clear_config_fun =\n\t    TableFunction("clear_encrypted_parquet_config", {}, ClearEncryptedParquetConfigTable,\n\t                  ClearEncryptedParquetConfigBind, nullptr, nullptr);\n\tloader.RegisterFunction(clear_config_fun);''')
 
 # Public API: explicit ENCRYPTION_CONFIG keeps owning the real AES key while
 # Hadoop-style properties can attach external/direct-KMS key metadata.
