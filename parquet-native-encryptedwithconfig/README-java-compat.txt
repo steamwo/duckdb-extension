@@ -24,8 +24,8 @@ java_compat_usage.sql
   Existing parquet-java/InMemoryKMS uniform-encryption example.
 
 direct_kms_usage.sql
-  Explicit AES encryption plus direct-KMS key metadata for a custom Spark
-  DecryptionPropertiesFactory/DecryptionKeyRetriever.
+  Explicit AES encryption plus COPY-local direct-KMS key metadata for a custom
+  Spark DecryptionPropertiesFactory/DecryptionKeyRetriever.
 
 Configuration SQL API
 ---------------------
@@ -44,17 +44,31 @@ Compatibility policy
 --------------------
 - Existing add_encrypted_parquet_key + COPY ENCRYPTION_CONFIG remains the
   authoritative source of the actual AES key.
-- When explicit ENCRYPTION_CONFIG is present and
-  parquet.encryption.footer.key is configured, that value is treated only as
-  the external/business/KMS key ID and does not alter the AES key.
+- footer_key is still a DuckDB-local key alias. It is resolved to the actual AES
+  key exactly as before and is never replaced by master_key_id.
+- COPY-local Direct-KMS metadata fields are:
+    master_key_id
+    kms_instance_id
+    kms_instance_url
+    crypto_factory_class
+    kms_client_class
+- When any COPY-local Direct-KMS field is supplied, master_key_id is required.
+  These values are attached to that COPY's ParquetEncryptionConfig during bind
+  and do not read EncryptedParquetConfiguration/ObjectCache.
 - Direct-KMS metadata is stored in FileCryptoMetaData.key_metadata as PKMT1
-  JSON. masterKeyID and the exact parquet.encryption.footer.key property carry
-  the configured external key ID.
-- parquet.crypto.factory.class and parquet.encryption.kms.client.class are also
-  persisted as additional JSON fields when configured.
+  JSON. masterKeyID and the exact parquet.encryption.footer.key JSON property
+  both carry master_key_id.
+- crypto_factory_class and kms_client_class are persisted using the parquet-java
+  property names parquet.crypto.factory.class and
+  parquet.encryption.kms.client.class.
 - Direct-KMS metadata includes duckdbDirectKey=true. A custom Spark
   DecryptionKeyRetriever should parse masterKeyID and return the final AES key
   directly; it should not invoke FileKeyUnwrapper/wrappedDEK processing.
 - If explicit ENCRYPTION_CONFIG is absent, the existing Hadoop-style uniform
-  mode and InMemoryKMS wrapping behavior are unchanged.
+  mode and InMemoryKMS wrapping behavior are unchanged and continue to use the
+  existing PRAGMA configuration API.
+- For PR #1 backward compatibility only, explicit COPY with no COPY-local
+  Direct-KMS fields may still obtain Direct-KMS metadata from PRAGMA. That
+  legacy fallback remains database-scoped and is not concurrency-safe; new
+  code should use the COPY-local fields above.
 - Per-column encryption is intentionally not implemented in this add-on.
