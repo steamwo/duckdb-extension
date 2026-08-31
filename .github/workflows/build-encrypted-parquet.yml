@@ -1,0 +1,156 @@
+name: Build encrypted_parquet extension
+
+on:
+  pull_request:
+    paths:
+      - 'parquet-native-encryptedwithconfig/**'
+      - '.github/workflows/build-encrypted-parquet.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'parquet-native-encryptedwithconfig/**'
+      - '.github/workflows/build-encrypted-parquet.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-amd64:
+    name: Linux x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build cmake g++
+
+      - name: Build encrypted_parquet
+        env:
+          BUILD_JOBS: '4'
+        run: bash parquet-native-encryptedwithconfig/build-linux-native-final.sh
+
+      - name: Verify extension artifact
+        run: |
+          test -s parquet-native-encryptedwithconfig/dist/linux_amd64/encrypted_parquet.duckdb_extension
+          file parquet-native-encryptedwithconfig/dist/linux_amd64/encrypted_parquet.duckdb_extension
+
+      - name: Runtime smoke test
+        run: |
+          cd parquet-native-encryptedwithconfig/dist/linux_amd64
+          cat > smoke.sql <<'SQL'
+          LOAD './encrypted_parquet.duckdb_extension';
+          SELECT function_name, function_type
+          FROM duckdb_functions()
+          WHERE function_name IN (
+            'clear_encrypted_parquet_config',
+            'set_encrypted_parquet_config',
+            'unset_encrypted_parquet_config',
+            'add_encrypted_parquet_key'
+          )
+          ORDER BY function_name;
+          SET force_mbedtls_unsafe=true;
+          PRAGMA clear_encrypted_parquet_config;
+          PRAGMA set_encrypted_parquet_config('parquet.encryption.footer.key','smoke-master-key');
+          PRAGMA add_encrypted_parquet_key('smoke_local','0123456789abcdef');
+          COPY (SELECT 1 AS id) TO 'smoke.parquet'
+          (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {footer_key:'smoke_local'});
+          PRAGMA clear_encrypted_parquet_config;
+          SQL
+          ./duckdb -unsigned < smoke.sql
+          test -s smoke.parquet
+
+      - name: Upload Linux x86_64 extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: encrypted-parquet-linux-amd64
+          path: |
+            parquet-native-encryptedwithconfig/dist/linux_amd64/encrypted_parquet.duckdb_extension
+            parquet-native-encryptedwithconfig/dist/linux_amd64/duckdb
+            parquet-native-encryptedwithconfig/dist/linux_amd64/RUN-LINUX.txt
+            parquet-native-encryptedwithconfig/dist/linux_amd64/java_compat_usage.sql
+            parquet-native-encryptedwithconfig/dist/linux_amd64/direct_kms_usage.sql
+            parquet-native-encryptedwithconfig/dist/linux_amd64.tar.gz
+          if-no-files-found: error
+
+  windows-amd64:
+    name: Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build encrypted_parquet
+        shell: pwsh
+        run: ./parquet-native-encryptedwithconfig/build-windows-native-final.ps1 -Work "$env:RUNNER_TEMP\ep"
+
+      - name: Verify extension artifact
+        shell: pwsh
+        run: |
+          $p = 'parquet-native-encryptedwithconfig/dist/windows_amd64/encrypted_parquet.duckdb_extension'
+          if (!(Test-Path $p)) { throw "Missing extension: $p" }
+          if ((Get-Item $p).Length -le 0) { throw "Empty extension: $p" }
+
+      - name: Runtime smoke test
+        shell: pwsh
+        run: |
+          $dist = (Resolve-Path 'parquet-native-encryptedwithconfig/dist/windows_amd64').Path
+          $duck = Join-Path $dist 'duckdb.exe'
+          $ext = (Join-Path $dist 'encrypted_parquet.duckdb_extension').Replace('\','/')
+          Push-Location $dist
+          try {
+            $sql = @"
+          LOAD '$ext';
+          SELECT function_name, function_type
+          FROM duckdb_functions()
+          WHERE function_name IN (
+            'clear_encrypted_parquet_config',
+            'set_encrypted_parquet_config',
+            'unset_encrypted_parquet_config',
+            'add_encrypted_parquet_key'
+          )
+          ORDER BY function_name;
+          SET force_mbedtls_unsafe=true;
+          PRAGMA clear_encrypted_parquet_config;
+          PRAGMA set_encrypted_parquet_config('parquet.encryption.footer.key','smoke-master-key');
+          PRAGMA add_encrypted_parquet_key('smoke_local','0123456789abcdef');
+          COPY (SELECT 1 AS id) TO 'smoke.parquet'
+          (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {footer_key:'smoke_local'});
+          PRAGMA clear_encrypted_parquet_config;
+          "@
+            $sql | & $duck -unsigned
+            if ($LASTEXITCODE -ne 0) { throw "DuckDB runtime smoke test failed with exit code $LASTEXITCODE" }
+            if (!(Test-Path 'smoke.parquet')) { throw 'smoke.parquet was not produced' }
+            if ((Get-Item 'smoke.parquet').Length -le 0) { throw 'smoke.parquet is empty' }
+          } finally {
+            Pop-Location
+          }
+
+      - name: Upload Windows x64 extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: encrypted-parquet-windows-amd64
+          path: |
+            parquet-native-encryptedwithconfig/dist/windows_amd64/encrypted_parquet.duckdb_extension
+            parquet-native-encryptedwithconfig/dist/windows_amd64/duckdb.exe
+            parquet-native-encryptedwithconfig/dist/windows_amd64/RUN-WINDOWS.txt
+            parquet-native-encryptedwithconfig/dist/windows_amd64/java_compat_usage.sql
+            parquet-native-encryptedwithconfig/dist/windows_amd64/direct_kms_usage.sql
+            parquet-native-encryptedwithconfig/dist/windows_amd64.zip
+          if-no-files-found: error

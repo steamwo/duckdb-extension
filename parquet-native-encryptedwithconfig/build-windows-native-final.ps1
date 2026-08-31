@@ -25,7 +25,7 @@ $Duck = Join-Path $Work "duckdb"
 git clone --depth 1 --branch v1.5.5 https://github.com/duckdb/duckdb.git $Duck
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-python "$PSScriptRoot\prepare_extension_java_compat_final.py" $Duck
+python "$PSScriptRoot\prepare_extension_direct_kms_final.py" $Duck
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $Config = (Join-Path $Duck "extension\extension_config_encrypted_parquet.cmake").Replace('\','/')
@@ -57,6 +57,9 @@ New-Item -ItemType Directory -Force $Dist | Out-Null
 Copy-Item -Force $DuckExe.FullName (Join-Path $Dist "duckdb.exe")
 Copy-Item -Force $Extension.FullName (Join-Path $Dist "encrypted_parquet.duckdb_extension")
 Copy-Item -Force "$PSScriptRoot\java_compat_usage.sql" (Join-Path $Dist "java_compat_usage.sql")
+if (Test-Path "$PSScriptRoot\direct_kms_usage.sql") {
+  Copy-Item -Force "$PSScriptRoot\direct_kms_usage.sql" (Join-Path $Dist "direct_kms_usage.sql")
+}
 
 @"
 DuckDB v1.5.5 + encrypted_parquet (windows_amd64 / MSVC)
@@ -67,7 +70,8 @@ Start:
 Then:
     LOAD 'encrypted_parquet.duckdb_extension';
 
-Use java_compat_usage.sql for the parquet-java/Spark-compatible configuration.
+Use java_compat_usage.sql for parquet-java/InMemoryKMS wrapping.
+Use direct_kms_usage.sql for explicit AES encryption plus direct-KMS metadata.
 Keep this MSVC duckdb.exe and MSVC extension together.
 "@ | Set-Content -Encoding UTF8 (Join-Path $Dist "RUN-WINDOWS.txt")
 
