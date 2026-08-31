@@ -27,6 +27,19 @@ direct_kms_usage.sql
   Explicit AES encryption plus direct-KMS key metadata for a custom Spark
   DecryptionPropertiesFactory/DecryptionKeyRetriever.
 
+Configuration SQL API
+---------------------
+- Set a property:
+    PRAGMA set_encrypted_parquet_config('name', 'value');
+- Unset a property:
+    PRAGMA unset_encrypted_parquet_config('name');
+- Clear all properties:
+    CALL clear_encrypted_parquet_config();
+
+The clear operation is a zero-argument table function because DuckDB v1.5.5
+loadable-extension runtime did not reliably resolve the zero-argument custom
+pragma form. CI executes this API after loading the produced extension.
+
 Compatibility policy
 --------------------
 - Existing add_encrypted_parquet_key + COPY ENCRYPTION_CONFIG remains the
