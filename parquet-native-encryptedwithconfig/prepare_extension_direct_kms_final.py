@@ -11,6 +11,21 @@ if not BASE.exists():
     raise SystemExit(f'base generator not found: {BASE}')
 
 subprocess.check_call([sys.executable, str(BASE), str(ROOT)])
+
+# The base generator adds unistd.h after io.h for the MinGW getpid path.
+# MSVC does not provide unistd.h, so keep that include MinGW-only.
+linenoise = ROOT / 'tools' / 'shell' / 'linenoise' / 'linenoise.cpp'
+linenoise_text = linenoise.read_text(encoding='utf-8')
+base_include = '#include <io.h>\n#include <unistd.h>\n'
+fixed_include = (
+    '#include <io.h>\n'
+    '#if defined(__MINGW32__) || defined(__MINGW64__)\n'
+    '#include <unistd.h>\n'
+    '#endif\n'
+)
+if base_include in linenoise_text:
+    linenoise.write_text(linenoise_text.replace(base_include, fixed_include, 1), encoding='utf-8')
+
 DST = ROOT / 'extension' / 'encrypted_parquet'
 
 
