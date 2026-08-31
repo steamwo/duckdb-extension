@@ -1,0 +1,96 @@
+name: Build encrypted_parquet extension
+
+on:
+  pull_request:
+    paths:
+      - 'parquet-native-encryptedwithconfig/**'
+      - '.github/workflows/build-encrypted-parquet.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'parquet-native-encryptedwithconfig/**'
+      - '.github/workflows/build-encrypted-parquet.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-amd64:
+    name: Linux x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build cmake g++
+
+      - name: Build encrypted_parquet
+        env:
+          BUILD_JOBS: '4'
+        run: bash parquet-native-encryptedwithconfig/build-linux-native-final.sh
+
+      - name: Verify extension artifact
+        run: |
+          test -s parquet-native-encryptedwithconfig/dist/linux_amd64/encrypted_parquet.duckdb_extension
+          file parquet-native-encryptedwithconfig/dist/linux_amd64/encrypted_parquet.duckdb_extension
+
+      - name: Upload Linux x86_64 extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: encrypted-parquet-linux-amd64
+          path: |
+            parquet-native-encryptedwithconfig/dist/linux_amd64/encrypted_parquet.duckdb_extension
+            parquet-native-encryptedwithconfig/dist/linux_amd64/duckdb
+            parquet-native-encryptedwithconfig/dist/linux_amd64/RUN-LINUX.txt
+            parquet-native-encryptedwithconfig/dist/linux_amd64/java_compat_usage.sql
+            parquet-native-encryptedwithconfig/dist/linux_amd64/direct_kms_usage.sql
+            parquet-native-encryptedwithconfig/dist/linux_amd64.tar.gz
+          if-no-files-found: error
+
+  windows-amd64:
+    name: Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build encrypted_parquet
+        shell: pwsh
+        run: ./parquet-native-encryptedwithconfig/build-windows-native-final.ps1
+
+      - name: Verify extension artifact
+        shell: pwsh
+        run: |
+          $p = 'parquet-native-encryptedwithconfig/dist/windows_amd64/encrypted_parquet.duckdb_extension'
+          if (!(Test-Path $p)) { throw "Missing extension: $p" }
+          if ((Get-Item $p).Length -le 0) { throw "Empty extension: $p" }
+
+      - name: Upload Windows x64 extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: encrypted-parquet-windows-amd64
+          path: |
+            parquet-native-encryptedwithconfig/dist/windows_amd64/encrypted_parquet.duckdb_extension
+            parquet-native-encryptedwithconfig/dist/windows_amd64/duckdb.exe
+            parquet-native-encryptedwithconfig/dist/windows_amd64/RUN-WINDOWS.txt
+            parquet-native-encryptedwithconfig/dist/windows_amd64/java_compat_usage.sql
+            parquet-native-encryptedwithconfig/dist/windows_amd64/direct_kms_usage.sql
+            parquet-native-encryptedwithconfig/dist/windows_amd64.zip
+          if-no-files-found: error
