@@ -36,7 +36,7 @@ COPY (
 TO 'java_compatible.parquet'
 (FORMAT encrypted_parquet);
 
-PRAGMA clear_encrypted_parquet_config();
+PRAGMA clear_encrypted_parquet_config;
 
 
 -- Spark / Scala read side:
