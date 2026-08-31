@@ -10,7 +10,7 @@ mkdir -p "$WORK"
 DUCK="$WORK/duckdb"
 git clone --depth 1 --branch v1.5.5 https://github.com/duckdb/duckdb.git "$DUCK"
 
-python3 "$SCRIPT_DIR/prepare_extension_direct_kms_final.py" "$DUCK"
+python3 "$SCRIPT_DIR/prepare_extension_direct_kms_runtime_final.py" "$DUCK"
 
 CONFIG="$DUCK/extension/extension_config_encrypted_parquet.cmake"
 BUILD="$DUCK/build/linux_amd64"
