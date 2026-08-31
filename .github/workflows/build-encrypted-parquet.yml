@@ -48,7 +48,7 @@ jobs:
       - name: Runtime smoke test
         run: |
           cd parquet-native-encryptedwithconfig/dist/linux_amd64
-          ./duckdb -unsigned -c "LOAD './encrypted_parquet.duckdb_extension'; SET force_mbedtls_unsafe=true; PRAGMA clear_encrypted_parquet_config; PRAGMA set_encrypted_parquet_config('parquet.encryption.footer.key','smoke-master-key'); PRAGMA add_encrypted_parquet_key('smoke_local','0123456789abcdef'); COPY (SELECT 1 AS id) TO 'smoke.parquet' (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {footer_key:'smoke_local'}); PRAGMA clear_encrypted_parquet_config;"
+          ./duckdb -unsigned -c "LOAD './encrypted_parquet.duckdb_extension'; SET force_mbedtls_unsafe=true; CALL clear_encrypted_parquet_config(); PRAGMA set_encrypted_parquet_config('parquet.encryption.footer.key','smoke-master-key'); PRAGMA add_encrypted_parquet_key('smoke_local','0123456789abcdef'); COPY (SELECT 1 AS id) TO 'smoke.parquet' (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {footer_key:'smoke_local'}); CALL clear_encrypted_parquet_config();"
           test -s smoke.parquet
 
       - name: Upload Linux x86_64 extension
@@ -96,7 +96,7 @@ jobs:
           $ext = (Join-Path $dist 'encrypted_parquet.duckdb_extension').Replace('\','/')
           Push-Location $dist
           try {
-            & $duck -unsigned -c "LOAD '$ext'; SET force_mbedtls_unsafe=true; PRAGMA clear_encrypted_parquet_config; PRAGMA set_encrypted_parquet_config('parquet.encryption.footer.key','smoke-master-key'); PRAGMA add_encrypted_parquet_key('smoke_local','0123456789abcdef'); COPY (SELECT 1 AS id) TO 'smoke.parquet' (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {footer_key:'smoke_local'}); PRAGMA clear_encrypted_parquet_config;"
+            & $duck -unsigned -c "LOAD '$ext'; SET force_mbedtls_unsafe=true; CALL clear_encrypted_parquet_config(); PRAGMA set_encrypted_parquet_config('parquet.encryption.footer.key','smoke-master-key'); PRAGMA add_encrypted_parquet_key('smoke_local','0123456789abcdef'); COPY (SELECT 1 AS id) TO 'smoke.parquet' (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {footer_key:'smoke_local'}); CALL clear_encrypted_parquet_config();"
             if ($LASTEXITCODE -ne 0) { throw "DuckDB runtime smoke test failed with exit code $LASTEXITCODE" }
             if (!(Test-Path 'smoke.parquet')) { throw 'smoke.parquet was not produced' }
             if ((Get-Item 'smoke.parquet').Length -le 0) { throw 'smoke.parquet is empty' }
