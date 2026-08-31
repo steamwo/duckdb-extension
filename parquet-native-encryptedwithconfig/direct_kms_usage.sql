@@ -5,29 +5,29 @@
 
 LOAD encrypted_parquet;
 
-CALL clear_encrypted_parquet_config();
+PRAGMA clear_encrypted_parquet_config();
 
 -- Example only. Replace with the actual 16/24/32-byte AES key used by your
 -- application. The first argument is only DuckDB's local key-registry name.
 PRAGMA add_encrypted_parquet_key('local_footer_key', '0123456789abcdef');
 
-CALL set_encrypted_parquet_config(
+PRAGMA set_encrypted_parquet_config(
   'parquet.crypto.factory.class',
   'com.company.DirectKmsCryptoFactory'
 );
-CALL set_encrypted_parquet_config(
+PRAGMA set_encrypted_parquet_config(
   'parquet.encryption.kms.client.class',
   'com.company.DirectKmsClient'
 );
-CALL set_encrypted_parquet_config(
+PRAGMA set_encrypted_parquet_config(
   'parquet.encryption.footer.key',
   'kms-master-key-123'
 );
-CALL set_encrypted_parquet_config(
+PRAGMA set_encrypted_parquet_config(
   'parquet.encryption.kms.instance.id',
   'production-kms'
 );
-CALL set_encrypted_parquet_config(
+PRAGMA set_encrypted_parquet_config(
   'parquet.encryption.kms.instance.url',
   'https://kms.example.invalid'
 );
@@ -41,7 +41,7 @@ COPY (
   }
 );
 
-CALL clear_encrypted_parquet_config();
+PRAGMA clear_encrypted_parquet_config();
 
 -- FileCryptoMetaData.key_metadata is a PKMT1 JSON payload containing at least:
 --   masterKeyID / parquet.encryption.footer.key = kms-master-key-123
