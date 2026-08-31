@@ -37,6 +37,13 @@ def rep(rel, old, new, count=1):
         raise RuntimeError(f'{rel}: expected {count} occurrence(s), found {actual}: {old[:160]!r}')
     p.write_text(s.replace(old, new), encoding='utf-8')
 
+# DuckDB does not accept an empty argument list for PRAGMA_CALL syntax.
+# Register the no-argument clear operation as a statement so callers can use:
+#   PRAGMA clear_encrypted_parquet_config;
+rep('parquet_extension.cpp',
+'''PragmaFunction::PragmaCall("clear_encrypted_parquet_config", ParquetCrypto::ClearConfig, {})''',
+'''PragmaFunction::PragmaStatement("clear_encrypted_parquet_config", ParquetCrypto::ClearConfig)''')
+
 # Public API: explicit ENCRYPTION_CONFIG keeps owning the real AES key while
 # Hadoop-style properties can attach external/direct-KMS key metadata.
 rep('include/parquet_crypto.hpp',
