@@ -1,6 +1,8 @@
 -- DuckDB: parquet-java PropertiesDrivenCryptoFactory / InMemoryKMS compatible uniform encryption
 LOAD encrypted_parquet;
 
+CALL clear_encrypted_parquet_config();
+
 PRAGMA set_encrypted_parquet_config(
   'parquet.crypto.factory.class',
   'org.apache.parquet.crypto.keytools.PropertiesDrivenCryptoFactory'
@@ -36,7 +38,7 @@ COPY (
 TO 'java_compatible.parquet'
 (FORMAT encrypted_parquet);
 
-PRAGMA clear_encrypted_parquet_config;
+CALL clear_encrypted_parquet_config();
 
 
 -- Spark / Scala read side:
