@@ -25,7 +25,7 @@ $Duck = Join-Path $Work "duckdb"
 git clone --depth 1 --branch v1.5.5 https://github.com/duckdb/duckdb.git $Duck
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-python "$PSScriptRoot\prepare_extension_direct_kms_final.py" $Duck
+python "$PSScriptRoot\prepare_extension_direct_kms_runtime_final.py" $Duck
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $Config = (Join-Path $Duck "extension\extension_config_encrypted_parquet.cmake").Replace('\','/')
