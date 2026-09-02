@@ -25,7 +25,8 @@ java_compat_usage.sql
 
 direct_kms_usage.sql
   Explicit AES encryption plus COPY-local direct-KMS key metadata for a custom
-  Spark DecryptionPropertiesFactory/DecryptionKeyRetriever.
+  Spark DecryptionPropertiesFactory/DecryptionKeyRetriever. The recommended
+  Direct-KMS key input is footer_key_value with from_base64()/from_hex().
 
 Configuration SQL API
 ---------------------
@@ -40,12 +41,44 @@ The clear operation is a zero-argument table function because DuckDB v1.5.5
 loadable-extension runtime did not reliably resolve the zero-argument custom
 pragma form. CI executes this API after loading the produced extension.
 
+Direct-KMS key input
+--------------------
+Preferred form:
+
+    ENCRYPTION_CONFIG {
+      footer_key_value: from_base64('<base64 AES key>'),
+      master_key_id: '<KMS master key id>',
+      ...
+    }
+
+or equivalently:
+
+    ENCRYPTION_CONFIG {
+      footer_key_value: from_hex('<hex AES key>'),
+      master_key_id: '<KMS master key id>',
+      ...
+    }
+
+from_base64()/from_hex() return the actual key bytes. A decoded length of 16,
+24, or 32 bytes selects AES-128, AES-192, or AES-256 respectively.
+
+This explicit binary form avoids an inherited DuckDB add_parquet_key ambiguity:
+a 16-byte AES key encodes to 24 Base64 characters, and a 24-character string is
+also a valid raw AES-192 key length. If such Base64 text is passed to an API that
+first accepts raw 16/24/32-character strings, it can be treated as 24 raw bytes
+instead of being Base64-decoded. AES-256 Base64 normally has 44 characters, so
+it does not collide with the raw-length check; this explains why AES-256 can
+appear to work while AES-128 fails interoperability.
+
 Compatibility policy
 --------------------
-- Existing add_encrypted_parquet_key + COPY ENCRYPTION_CONFIG remains the
-  authoritative source of the actual AES key.
-- footer_key is still a DuckDB-local key alias. It is resolved to the actual AES
-  key exactly as before and is never replaced by master_key_id.
+- footer_key_value is the recommended actual AES-key source for new Direct-KMS
+  code. Use from_base64()/from_hex() so textual key encodings are explicitly
+  decoded to BLOB bytes before encryption.
+- Existing add_encrypted_parquet_key + footer_key:'alias' remains supported for
+  backward compatibility. footer_key is still a DuckDB-local key alias and is
+  resolved to the actual AES key exactly as before; it is never replaced by
+  master_key_id.
 - COPY-local Direct-KMS metadata fields are:
     master_key_id
     kms_instance_id
