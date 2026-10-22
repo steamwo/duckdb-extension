@@ -45,7 +45,7 @@ jobs:
           test -s parquet-native-encryptedwithconfig/dist/linux_amd64/encrypted_parquet.duckdb_extension
           file parquet-native-encryptedwithconfig/dist/linux_amd64/encrypted_parquet.duckdb_extension
 
-      - name: Runtime and COPY-config isolation smoke test
+      - name: Runtime, binary-key and COPY-config isolation smoke test
         run: |
           cd parquet-native-encryptedwithconfig/dist/linux_amd64
           cat > smoke.sql <<'SQL'
@@ -64,58 +64,106 @@ jobs:
           PRAGMA set_encrypted_parquet_config('parquet.encryption.footer.key','legacy-global-master');
           PRAGMA set_encrypted_parquet_config('parquet.crypto.factory.class','legacy.GlobalFactory');
           PRAGMA add_encrypted_parquet_key('smoke_local_a','0123456789abcdef');
-          PRAGMA add_encrypted_parquet_key('smoke_local_b','abcdef0123456789');
 
-          -- PR #1 legacy fallback remains functional.
+          -- PR #1 legacy alias fallback remains functional.
           COPY (SELECT 0 AS id) TO 'legacy.parquet'
           (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {footer_key:'smoke_local_a'});
 
-          -- COPY-local Direct-KMS metadata must win over the conflicting shared
-          -- PRAGMA values and remain isolated between files.
+          -- Recommended Direct-KMS path: decode textual keys to BLOB bytes inside
+          -- this COPY. AES-128 Base64 is the historical ambiguity regression:
+          -- its encoded representation is 24 characters but must become 16 bytes.
           COPY (SELECT 1 AS id) TO 'copy_a.parquet'
           (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {
-            footer_key:'smoke_local_a',
+            footer_key_value: from_base64('MDEyMzQ1Njc4OWFiY2RlZg=='),
             master_key_id:'copy-master-A',
             kms_instance_id:'kms-A',
             kms_instance_url:'https://kms-a.invalid',
             crypto_factory_class:'copy.FactoryA',
             kms_client_class:'copy.ClientA'
           });
+
+          -- Equivalent AES-128 binary key supplied as Hex.
+          COPY (SELECT 3 AS id) TO 'copy_hex.parquet'
+          (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {
+            footer_key_value: from_hex('30313233343536373839616263646566'),
+            master_key_id:'copy-master-HEX',
+            kms_instance_id:'kms-HEX',
+            kms_instance_url:'https://kms-hex.invalid',
+            crypto_factory_class:'copy.FactoryHex',
+            kms_client_class:'copy.ClientHex'
+          });
+
+          -- AES-256 Base64 regression/control: decodes to exactly 32 bytes.
           COPY (SELECT 2 AS id) TO 'copy_b.parquet'
           (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {
-            footer_key:'smoke_local_b',
+            footer_key_value: from_base64('MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY='),
             master_key_id:'copy-master-B',
             kms_instance_id:'kms-B',
             kms_instance_url:'https://kms-b.invalid',
             crypto_factory_class:'copy.FactoryB',
             kms_client_class:'copy.ClientB'
           });
+
+          -- Decrypt/read each file with the exact binary key representation used
+          -- for writing. Any key-size mix-up or AES-GCM tag mismatch makes the CLI
+          -- return non-zero and fails the workflow.
+          SELECT * FROM read_parquet(
+            'copy_a.parquet',
+            encryption_config={footer_key_value: from_base64('MDEyMzQ1Njc4OWFiY2RlZg==')}
+          );
+          SELECT * FROM read_parquet(
+            'copy_hex.parquet',
+            encryption_config={footer_key_value: from_hex('30313233343536373839616263646566')}
+          );
+          SELECT * FROM read_parquet(
+            'copy_b.parquet',
+            encryption_config={footer_key_value: from_base64('MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=')}
+          );
+
           PRAGMA clear_encrypted_parquet_config;
           SQL
           ./duckdb -unsigned < smoke.sql
           test -s legacy.parquet
           test -s copy_a.parquet
+          test -s copy_hex.parquet
           test -s copy_b.parquet
           python - <<'PY'
           from pathlib import Path
 
           legacy = Path('legacy.parquet').read_bytes()
           a = Path('copy_a.parquet').read_bytes()
+          h = Path('copy_hex.parquet').read_bytes()
           b = Path('copy_b.parquet').read_bytes()
 
+          assert legacy.startswith(b'PARE')
+          assert a.startswith(b'PARE')
+          assert h.startswith(b'PARE')
+          assert b.startswith(b'PARE')
+
           assert b'legacy-global-master' in legacy
+
           assert b'copy-master-A' in a
           assert b'kms-A' in a
           assert b'copy.FactoryA' in a
           assert b'copy.ClientA' in a
           assert b'copy-master-B' not in a
+          assert b'copy-master-HEX' not in a
           assert b'legacy-global-master' not in a
+
+          assert b'copy-master-HEX' in h
+          assert b'kms-HEX' in h
+          assert b'copy.FactoryHex' in h
+          assert b'copy.ClientHex' in h
+          assert b'copy-master-A' not in h
+          assert b'copy-master-B' not in h
+          assert b'legacy-global-master' not in h
 
           assert b'copy-master-B' in b
           assert b'kms-B' in b
           assert b'copy.FactoryB' in b
           assert b'copy.ClientB' in b
           assert b'copy-master-A' not in b
+          assert b'copy-master-HEX' not in b
           assert b'legacy-global-master' not in b
           PY
 
@@ -156,7 +204,7 @@ jobs:
           if (!(Test-Path $p)) { throw "Missing extension: $p" }
           if ((Get-Item $p).Length -le 0) { throw "Empty extension: $p" }
 
-      - name: Runtime and COPY-config isolation smoke test
+      - name: Runtime, binary-key and COPY-config isolation smoke test
         shell: pwsh
         run: |
           $dist = (Resolve-Path 'parquet-native-encryptedwithconfig/dist/windows_amd64').Path
@@ -180,32 +228,58 @@ jobs:
           PRAGMA set_encrypted_parquet_config('parquet.encryption.footer.key','legacy-global-master');
           PRAGMA set_encrypted_parquet_config('parquet.crypto.factory.class','legacy.GlobalFactory');
           PRAGMA add_encrypted_parquet_key('smoke_local_a','0123456789abcdef');
-          PRAGMA add_encrypted_parquet_key('smoke_local_b','abcdef0123456789');
+
           COPY (SELECT 0 AS id) TO 'legacy.parquet'
           (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {footer_key:'smoke_local_a'});
+
           COPY (SELECT 1 AS id) TO 'copy_a.parquet'
           (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {
-            footer_key:'smoke_local_a',
+            footer_key_value: from_base64('MDEyMzQ1Njc4OWFiY2RlZg=='),
             master_key_id:'copy-master-A',
             kms_instance_id:'kms-A',
             kms_instance_url:'https://kms-a.invalid',
             crypto_factory_class:'copy.FactoryA',
             kms_client_class:'copy.ClientA'
           });
+
+          COPY (SELECT 3 AS id) TO 'copy_hex.parquet'
+          (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {
+            footer_key_value: from_hex('30313233343536373839616263646566'),
+            master_key_id:'copy-master-HEX',
+            kms_instance_id:'kms-HEX',
+            kms_instance_url:'https://kms-hex.invalid',
+            crypto_factory_class:'copy.FactoryHex',
+            kms_client_class:'copy.ClientHex'
+          });
+
           COPY (SELECT 2 AS id) TO 'copy_b.parquet'
           (FORMAT encrypted_parquet, ENCRYPTION_CONFIG {
-            footer_key:'smoke_local_b',
+            footer_key_value: from_base64('MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY='),
             master_key_id:'copy-master-B',
             kms_instance_id:'kms-B',
             kms_instance_url:'https://kms-b.invalid',
             crypto_factory_class:'copy.FactoryB',
             kms_client_class:'copy.ClientB'
           });
+
+          SELECT * FROM read_parquet(
+            'copy_a.parquet',
+            encryption_config={footer_key_value: from_base64('MDEyMzQ1Njc4OWFiY2RlZg==')}
+          );
+          SELECT * FROM read_parquet(
+            'copy_hex.parquet',
+            encryption_config={footer_key_value: from_hex('30313233343536373839616263646566')}
+          );
+          SELECT * FROM read_parquet(
+            'copy_b.parquet',
+            encryption_config={footer_key_value: from_base64('MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=')}
+          );
+
           PRAGMA clear_encrypted_parquet_config;
           "@
             $sql | & $duck -unsigned
             if ($LASTEXITCODE -ne 0) { throw "DuckDB runtime smoke test failed with exit code $LASTEXITCODE" }
-            foreach ($file in @('legacy.parquet', 'copy_a.parquet', 'copy_b.parquet')) {
+            foreach ($file in @('legacy.parquet', 'copy_a.parquet', 'copy_hex.parquet', 'copy_b.parquet')) {
               if (!(Test-Path $file)) { throw "$file was not produced" }
               if ((Get-Item $file).Length -le 0) { throw "$file is empty" }
             }
@@ -214,21 +288,38 @@ jobs:
 
           legacy = Path('legacy.parquet').read_bytes()
           a = Path('copy_a.parquet').read_bytes()
+          h = Path('copy_hex.parquet').read_bytes()
           b = Path('copy_b.parquet').read_bytes()
 
+          assert legacy.startswith(b'PARE')
+          assert a.startswith(b'PARE')
+          assert h.startswith(b'PARE')
+          assert b.startswith(b'PARE')
+
           assert b'legacy-global-master' in legacy
+
           assert b'copy-master-A' in a
           assert b'kms-A' in a
           assert b'copy.FactoryA' in a
           assert b'copy.ClientA' in a
           assert b'copy-master-B' not in a
+          assert b'copy-master-HEX' not in a
           assert b'legacy-global-master' not in a
+
+          assert b'copy-master-HEX' in h
+          assert b'kms-HEX' in h
+          assert b'copy.FactoryHex' in h
+          assert b'copy.ClientHex' in h
+          assert b'copy-master-A' not in h
+          assert b'copy-master-B' not in h
+          assert b'legacy-global-master' not in h
 
           assert b'copy-master-B' in b
           assert b'kms-B' in b
           assert b'copy.FactoryB' in b
           assert b'copy.ClientB' in b
           assert b'copy-master-A' not in b
+          assert b'copy-master-HEX' not in b
           assert b'legacy-global-master' not in b
           '@ | python -
             if ($LASTEXITCODE -ne 0) { throw "COPY-config isolation check failed with exit code $LASTEXITCODE" }
