@@ -1,3 +1,4 @@
+# One-time release workflow for DuckDB 1.5.5 artifacts from Action #31.
 name: Publish v1.5.5 from Action 31
 
 on:
