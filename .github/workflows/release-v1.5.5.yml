@@ -1,5 +1,5 @@
-# One-time release workflow for DuckDB 1.5.5 artifacts from Action #31.
-name: Publish v1.5.5 from Action 31
+# One-time release-note repair for v1.5.5.
+name: Fix v1.5.5 release notes
 
 on:
   push:
@@ -9,63 +9,20 @@ on:
       - '.github/workflows/release-v1.5.5.yml'
 
 permissions:
-  actions: read
   contents: write
 
 jobs:
-  release:
-    name: Publish existing Action #31 artifacts
+  release-notes:
+    name: Fix release notes
     runs-on: ubuntu-24.04
     steps:
-      - name: Download Linux artifact from Action #31
+      - name: Update v1.5.5 release notes
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh run download 39707881151 \
-            --repo "$GITHUB_REPOSITORY" \
-            --name encrypted-parquet-linux-amd64 \
-            --dir artifacts/linux
-
-      - name: Download Windows artifact from Action #31
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh run download 39707881151 \
-            --repo "$GITHUB_REPOSITORY" \
-            --name encrypted-parquet-windows-amd64 \
-            --dir artifacts/windows
-
-      - name: Prepare release assets
         shell: bash
         run: |
           set -euo pipefail
-          linux_asset="$(find artifacts/linux -type f -name 'linux_amd64.tar.gz' -print -quit)"
-          windows_asset="$(find artifacts/windows -type f -name 'windows_amd64.zip' -print -quit)"
-          test -n "$linux_asset"
-          test -n "$windows_asset"
-          cp "$linux_asset" linux_amd64.tar.gz
-          cp "$windows_asset" windows_amd64.zip
-          test -s linux_amd64.tar.gz
-          test -s windows_amd64.zip
-          sha256sum linux_amd64.tar.gz windows_amd64.zip > SHA256SUMS.txt
-          cat SHA256SUMS.txt
-
-      - name: Publish v1.5.5 release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TARGET: f2a608a0c0f8fc1951e5e9d24d5ccfb83b5a8eb2
-        shell: bash
-        run: |
-          set -euo pipefail
-          if gh release view v1.5.5 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo 'Release v1.5.5 already exists; nothing to do.'
-            exit 0
-          fi
-
-          linux_sha="$(sha256sum linux_amd64.tar.gz | awk '{print $1}')"
-          windows_sha="$(sha256sum windows_amd64.zip | awk '{print $1}')"
-
-          cat > RELEASE_NOTES.md <<EOF
+          cat > RELEASE_NOTES.md <<'EOF'
           # encrypted_parquet for DuckDB 1.5.5
 
           This release targets **DuckDB 1.5.5**.
@@ -79,19 +36,15 @@ jobs:
 
           Direct-KMS recommended key input uses `footer_key_value` with explicit `from_base64()` / `from_hex()` decoding. The legacy `footer_key` alias path remains supported.
 
-          Source release tree: `$RELEASE_TARGET`
+          Source release tree: `f2a608a0c0f8fc1951e5e9d24d5ccfb83b5a8eb2`
           Build source: Action #31 (`39707881151`)
 
           SHA-256:
-          - `linux_amd64.tar.gz`: `$linux_sha`
-          - `windows_amd64.zip`: `$windows_sha`
+          - `linux_amd64.tar.gz`: `2a8b482cd53e16da6efa105009ad80b85d2773b76e0ce6190c906c5e6ced8478`
+          - `windows_amd64.zip`: `6fb1dac76a29e0d7e6ac48aef0afe649f532356a02e35e7041a0607ab82154d2`
           EOF
 
-          gh release create v1.5.5 \
-            linux_amd64.tar.gz \
-            windows_amd64.zip \
-            SHA256SUMS.txt \
+          gh release edit v1.5.5 \
             --repo "$GITHUB_REPOSITORY" \
-            --target "$RELEASE_TARGET" \
             --title 'encrypted_parquet for DuckDB 1.5.5' \
             --notes-file RELEASE_NOTES.md
